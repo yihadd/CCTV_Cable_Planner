@@ -1,6 +1,6 @@
 # CCTV Cable Planner
 
-#[Visite](https://yihadd.github.io/CCTV_Cable_Planner/) a Website
+[Visite](https://yihadd.github.io/CCTV_Cable_Planner/) a Website
 
 เว็บแอปสำหรับวางแผนติดตั้งกล้อง CCTV บนแผนที่ และประเมินระยะสายจากแนวที่วาด
 

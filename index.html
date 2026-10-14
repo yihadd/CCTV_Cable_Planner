@@ -1,0 +1,1891 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CCTV Cable Planner — วางแผนติดตั้งกล้องวงจรปิดและคำนวณระยะสาย</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.0/jspdf.plugin.autotable.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/fontsource/fonts/noto-sans-thai@latest/thai-400-normal.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/fontsource/fonts/noto-sans-thai@latest/thai-600-normal.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/fontsource/fonts/noto-sans-thai@latest/thai-700-normal.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono@latest/latin-400-normal.css">
+<style>
+  * { font-family: 'Noto Sans Thai', sans-serif; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+  body { margin: 0; overflow: hidden; background: #0f172a; }
+  #map { width: 100%; height: 100vh; background: #1e293b; }
+
+  .glass {
+    background: rgba(15, 23, 42, 0.92);
+    backdrop-filter: blur(16px);
+    border: 1px solid rgba(148, 163, 184, 0.15);
+  }
+  .glass-light {
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(12px);
+  }
+
+  .tool-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #cbd5e1;
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.1);
+    cursor: pointer;
+    transition: all 0.2s;
+    width: 100%;
+    text-align: left;
+  }
+  .tool-btn:hover { background: rgba(51, 65, 85, 0.8); border-color: rgba(148, 163, 184, 0.25); }
+  .tool-btn.active {
+    background: linear-gradient(135deg, #3b82f6, #6366f1);
+    color: white;
+    border-color: transparent;
+    box-shadow: 0 4px 15px rgba(59, 130, 246, 0.4);
+  }
+
+  .type-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .marker-cctv { background: #ef4444; box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.3); }
+  .marker-nvr { background: #a855f7; box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.3); }
+  .marker-switch { background: #3b82f6; box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.3); }
+  .marker-junction { background: #f59e0b; box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.3); }
+  .marker-route { background: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.3); }
+  .marker-custom { background: #64748b; box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.3); }
+
+  .custom-marker {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 3px solid white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: white;
+    font-weight: 700;
+    font-size: 11px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    cursor: pointer;
+    transition: transform 0.2s;
+  }
+  .custom-marker:hover { transform: scale(1.15); }
+  .custom-marker.selected { transform: scale(1.25); box-shadow: 0 0 0 4px #fbbf24, 0 2px 8px rgba(0,0,0,0.4); }
+
+  .sidebar-section {
+    border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+    padding: 14px 16px;
+  }
+  .sidebar-section:last-child { border-bottom: none; }
+
+  .device-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.15s;
+    font-size: 13px;
+  }
+  .device-item:hover { background: rgba(51, 65, 85, 0.5); }
+  .device-item.selected { background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.3); }
+
+  .stat-card {
+    background: linear-gradient(135deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.8));
+    border: 1px solid rgba(148, 163, 184, 0.1);
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+  .stat-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    font-weight: 700;
+    background: linear-gradient(135deg, #60a5fa, #a78bfa);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .modal-content {
+    background: #0f172a;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 16px;
+    max-width: 500px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+    color: #e2e8f0;
+  }
+
+  .input-field {
+    width: 100%;
+    padding: 9px 12px;
+    background: rgba(15, 23, 42, 0.8);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 8px;
+    color: #e2e8f0;
+    font-size: 14px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  .input-field:focus { border-color: #3b82f6; }
+
+  .btn-primary {
+    padding: 9px 16px;
+    background: linear-gradient(135deg, #3b82f6, #6366f1);
+    color: white;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    border: none;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  .btn-primary:hover { opacity: 0.9; }
+  .btn-secondary {
+    padding: 9px 16px;
+    background: rgba(51, 65, 85, 0.6);
+    color: #cbd5e1;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-secondary:hover { background: rgba(71, 85, 105, 0.8); }
+  .btn-danger {
+    padding: 9px 16px;
+    background: rgba(239, 68, 68, 0.15);
+    color: #fca5a5;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 13px;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    cursor: pointer;
+  }
+  .btn-danger:hover { background: rgba(239, 68, 68, 0.25); }
+
+  .toast {
+    position: fixed;
+    top: 80px;
+    left: 50%;
+    transform: translateX(-50%) translateY(-20px);
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    z-index: 2000;
+    opacity: 0;
+    transition: all 0.3s;
+    pointer-events: none;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .toast.success { background: rgba(34, 197, 94, 0.95); color: white; }
+  .toast.error { background: rgba(239, 68, 68, 0.95); color: white; }
+  .toast.info { background: rgba(59, 130, 246, 0.95); color: white; }
+
+  .search-box {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 500;
+    width: min(500px, calc(100% - 32px));
+    max-width: 500px;
+  }
+  .search-input {
+    width: 100%;
+    padding: 12px 16px 12px 44px;
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 12px;
+    color: white;
+    font-size: 14px;
+    outline: none;
+    backdrop-filter: blur(12px);
+  }
+  .search-input:focus { border-color: #3b82f6; }
+  .search-results {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    margin-top: 6px;
+    background: rgba(15, 23, 42, 0.98);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 12px;
+    max-height: 300px;
+    overflow-y: auto;
+    display: none;
+  }
+  .search-results.show { display: block; }
+  .search-item {
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #cbd5e1;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.08);
+  }
+  .search-item:hover { background: rgba(51, 65, 85, 0.5); }
+  .search-item:last-child { border-bottom: none; }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: #cbd5e1;
+  }
+
+  .tab-btn {
+    flex: 1;
+    padding: 8px;
+    background: transparent;
+    color: #94a3b8;
+    border: none;
+    border-bottom: 2px solid transparent;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .tab-btn.active { color: #60a5fa; border-bottom-color: #3b82f6; }
+
+  .cable-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .leaflet-div-icon { background: transparent !important; border: none !important; }
+
+  .distance-label {
+    background: rgba(15, 23, 42, 0.9);
+    color: #fbbf24;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    white-space: nowrap;
+  }
+
+  #sidebar {
+    transition: transform 0.3s;
+  }
+  #sidebar.collapsed {
+    transform: translateX(-100%);
+  }
+
+  @media (max-width: 768px) {
+    #sidebar {
+      position: absolute;
+      z-index: 600;
+      height: 100vh;
+      width: 320px !important;
+    }
+    #sidebar.collapsed { transform: translateX(-100%); }
+    .search-box { top: 70px; }
+  }
+
+  .scroll-area { overflow-y: auto; max-height: calc(100vh - 280px); }
+  .scroll-area::-webkit-scrollbar { width: 6px; }
+  .scroll-area::-webkit-scrollbar-track { background: transparent; }
+  .scroll-area::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.2); border-radius: 3px; }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .warning-banner {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    color: #fcd34d;
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 12px;
+    margin: 12px 16px;
+  }
+
+  .help-tip {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    color: #e2e8f0;
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    z-index: 700;
+    backdrop-filter: blur(12px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  }
+</style>
+</head>
+<body>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<!-- Sidebar -->
+<aside id="sidebar" class="glass fixed left-0 top-0 h-screen w-80 z-50 flex flex-col text-white">
+  <!-- Header -->
+  <div class="p-4 border-b border-slate-700/50">
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-2">
+        <div class="w-9 h-9 rounded-lg bg-gradient-to-br from-red-500 to-orange-500 flex items-center justify-center">
+          <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+          </svg>
+        </div>
+        <div>
+          <div class="font-bold text-sm">CCTV Planner</div>
+          <div class="text-[10px] text-slate-400">Cable Planning Tool</div>
+        </div>
+      </div>
+      <button id="btnCloseSidebar" class="md:hidden p-1.5 hover:bg-slate-700 rounded-lg">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <input id="projectName" type="text" class="input-field text-sm" value="โครงการใหม่" placeholder="ชื่อโครงการ">
+  </div>
+
+  <!-- Tabs -->
+  <div class="flex border-b border-slate-700/50">
+    <button class="tab-btn active" data-tab="tools">🛠️ เครื่องมือ</button>
+    <button class="tab-btn" data-tab="devices">📋 อุปกรณ์</button>
+    <button class="tab-btn" data-tab="summary">📊 สรุป</button>
+  </div>
+
+  <!-- Tab Content -->
+  <div class="scroll-area flex-1">
+
+    <!-- Tools Tab -->
+    <div id="tab-tools" class="tab-content">
+      <div class="sidebar-section">
+        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">เพิ่มจุด (คลิกแผนที่)</div>
+        <div class="space-y-1.5">
+          <button class="tool-btn" data-mode="cctv">
+            <span class="type-dot marker-cctv"></span> 📹 กล้อง CCTV
+          </button>
+          <button class="tool-btn" data-mode="nvr">
+            <span class="type-dot marker-nvr"></span> 🗄️ NVR / Server
+          </button>
+          <button class="tool-btn" data-mode="switch">
+            <span class="type-dot marker-switch"></span> 🔲 Switch / Rack
+          </button>
+          <button class="tool-btn" data-mode="junction">
+            <span class="type-dot marker-junction"></span> 📦 Junction Box
+          </button>
+          <button class="tool-btn" data-mode="route">
+            <span class="type-dot marker-route"></span> 📍 จุดหักเลี้ยว
+          </button>
+          <button class="tool-btn" data-mode="custom">
+            <span class="type-dot marker-custom"></span> ⚪ จุดกำหนดเอง
+          </button>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">เครื่องมือวัด</div>
+        <div class="space-y-1.5">
+          <button class="tool-btn" data-mode="cable">
+            🧵 วาดแนวเดินสาย
+          </button>
+          <button class="tool-btn" data-mode="measure">
+            📏 วัดระยะเส้นตรง
+          </button>
+          <button class="tool-btn" data-mode="select">
+            👆 เลือก / แก้ไข
+          </button>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">การตั้งค่าการคำนวณ</div>
+        <div class="space-y-3 text-xs">
+          <div>
+            <label class="text-slate-400 mb-1 block">สายสำรอง (%)</label>
+            <div class="flex gap-1">
+              <button class="spare-btn btn-secondary text-xs flex-1" data-val="5">5%</button>
+              <button class="spare-btn btn-secondary text-xs flex-1 active" data-val="10" style="background: linear-gradient(135deg, #3b82f6, #6366f1); color: white;">10%</button>
+              <button class="spare-btn btn-secondary text-xs flex-1" data-val="15">15%</button>
+            </div>
+            <input id="customSpare" type="number" min="0" max="100" placeholder="กำหนดเอง" class="input-field text-xs mt-1">
+          </div>
+          <div>
+            <label class="text-slate-400 mb-1 block">ระยะเผื่อปลายสายต่อจุด (ม.)</label>
+            <input id="endAllowance" type="number" min="0" value="3" step="0.5" class="input-field text-xs">
+          </div>
+          <div>
+            <label class="text-slate-400 mb-1 block">ระยะเผื่อแนวดิ่งต่อกล้อง (ม.)</label>
+            <input id="verticalAllowance" type="number" min="0" value="2" step="0.5" class="input-field text-xs">
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">การจัดการโครงการ</div>
+        <div class="grid grid-cols-2 gap-1.5">
+          <button id="btnSave" class="btn-primary text-xs">💾 บันทึก</button>
+          <button id="btnLoad" class="btn-secondary text-xs">📂 เปิด</button>
+          <button id="btnExportJSON" class="btn-secondary text-xs">📤 JSON</button>
+          <button id="btnImportJSON" class="btn-secondary text-xs">📥 Import</button>
+          <button id="btnExportCSV" class="btn-secondary text-xs">📊 CSV</button>
+          <button id="btnExportPDF" class="btn-secondary text-xs">📄 PDF</button>
+          <button id="btnUndo" class="btn-secondary text-xs">↶ Undo</button>
+          <button id="btnRedo" class="btn-secondary text-xs">↷ Redo</button>
+          <button id="btnClear" class="btn-danger text-xs col-span-2">🗑️ ล้างข้อมูลทั้งหมด</button>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">สัญลักษณ์</div>
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <div class="legend-item"><span class="type-dot marker-cctv"></span>CCTV</div>
+          <div class="legend-item"><span class="type-dot marker-nvr"></span>NVR</div>
+          <div class="legend-item"><span class="type-dot marker-switch"></span>Switch</div>
+          <div class="legend-item"><span class="type-dot marker-junction"></span>Junction</div>
+          <div class="legend-item"><span class="type-dot marker-route"></span>Route Point</div>
+          <div class="legend-item"><span class="type-dot marker-custom"></span>Custom</div>
+          <div class="legend-item col-span-2">
+            <span class="w-4 h-0.5 bg-amber-400"></span>
+            แนวเดินสาย
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Devices Tab -->
+    <div id="tab-devices" class="tab-content hidden">
+      <div class="sidebar-section">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">รายการอุปกรณ์</div>
+          <div id="deviceCount" class="badge bg-blue-500/20 text-blue-400">0</div>
+        </div>
+        <div id="deviceList" class="space-y-1"></div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="flex items-center justify-between mb-2">
+          <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">แนวเดินสาย</div>
+          <div id="cableCount" class="badge bg-amber-500/20 text-amber-400">0</div>
+        </div>
+        <div id="cableList" class="space-y-1"></div>
+      </div>
+    </div>
+
+    <!-- Summary Tab -->
+    <div id="tab-summary" class="tab-content hidden">
+      <div class="sidebar-section">
+        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">สรุปโครงการ</div>
+        <div class="grid grid-cols-2 gap-2">
+          <div class="stat-card">
+            <div class="text-[10px] text-slate-400">📹 กล้อง</div>
+            <div class="stat-value" id="sumCameras">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="text-[10px] text-slate-400">🔲 Switch</div>
+            <div class="stat-value" id="sumSwitches">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="text-[10px] text-slate-400">🗄️ NVR</div>
+            <div class="stat-value" id="sumNVRs">0</div>
+          </div>
+          <div class="stat-card">
+            <div class="text-[10px] text-slate-400">📦 Junction</div>
+            <div class="stat-value" id="sumJunctions">0</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section">
+        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-3">ระยะสาย</div>
+        <div class="space-y-2">
+          <div class="flex justify-between items-center">
+            <span class="text-xs text-slate-400">ระยะตามแนวสายรวม</span>
+            <span class="mono text-sm font-bold text-amber-400" id="sumCableLength">0.00 ม.</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-xs text-slate-400">ระยะเผื่อรวม</span>
+            <span class="mono text-sm font-bold text-blue-400" id="sumAllowance">0.00 ม.</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-xs text-slate-400">สายสำรอง (<span id="sumSparePercent">10</span>%)</span>
+            <span class="mono text-sm font-bold text-purple-400" id="sumSpare">0.00 ม.</span>
+          </div>
+          <div class="flex justify-between items-center pt-2 border-t border-slate-700/50">
+            <span class="text-xs font-bold text-white">🎯 แนะนำให้เตรียม</span>
+            <span class="mono text-base font-bold" style="background: linear-gradient(135deg, #60a5fa, #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent;" id="sumTotal">0.00 ม.</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span class="text-xs text-slate-400">(กิโลเมตร)</span>
+            <span class="mono text-sm text-slate-300" id="sumTotalKm">0.000 กม.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="warning-banner">
+        <strong>⚠️ ข้อควรทราบ:</strong> ระยะที่คำนวณเป็นค่าประมาณจากแผนที่ ต้องตรวจสอบหน้างานจริงก่อนซื้อสายและติดตั้ง
+      </div>
+
+      <div class="sidebar-section">
+        <div class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">ตารางระยะสายรายกล้อง</div>
+        <div id="cameraTable" class="text-xs"></div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<!-- Sidebar Toggle (Mobile) -->
+<button id="btnToggleSidebar" class="md:hidden fixed top-4 left-4 z-50 glass text-white p-2.5 rounded-xl shadow-lg">
+  <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+</button>
+
+<!-- Map -->
+<div id="mapContainer" class="absolute inset-0 md:left-80">
+  <!-- Search -->
+  <div class="search-box">
+    <div class="relative">
+      <svg class="w-4 h-4 absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+      <input id="searchInput" type="text" class="search-input" placeholder="🔍 ค้นหาสถานที่ หรือพิมพ์ที่อยู่...">
+    </div>
+    <div id="searchResults" class="search-results"></div>
+  </div>
+
+  <!-- Mode indicator -->
+  <div id="modeIndicator" class="fixed top-20 right-4 z-50 glass text-white px-4 py-2 rounded-xl text-sm font-semibold hidden">
+    <span id="modeText"></span>
+    <button id="btnCancelMode" class="ml-2 text-red-400 hover:text-red-300">✕</button>
+  </div>
+
+  <!-- Help tip -->
+  <div id="helpTip" class="help-tip hidden">
+    <span id="helpText"></span>
+  </div>
+
+  <!-- Map controls -->
+  <div class="fixed bottom-4 right-4 z-50 flex flex-col gap-2">
+    <button id="btnFitAll" class="glass text-white p-3 rounded-xl shadow-lg hover:bg-slate-700" title="ซูมให้เห็นทั้งหมด">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
+    </button>
+    <button id="btnBasemap" class="glass text-white p-3 rounded-xl shadow-lg hover:bg-slate-700" title="สลับชั้นแผนที่">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+    </button>
+  </div>
+
+  <!-- Coordinates -->
+  <div id="coordsDisplay" class="fixed bottom-4 left-4 md:left-[340px] z-50 glass text-white px-3 py-1.5 rounded-lg text-xs mono">
+    <span id="coordsText">คลิกบนแผนที่เพื่อดูพิกัด</span>
+  </div>
+
+  <!-- Map -->
+  <div id="map"></div>
+</div>
+
+<!-- Modal: Edit Marker -->
+<div id="markerModal" class="modal-overlay hidden">
+  <div class="modal-content">
+    <div class="p-5 border-b border-slate-700/50 flex items-center justify-between">
+      <h3 class="font-bold text-lg" id="modalTitle">แก้ไขรายละเอียด</h3>
+      <button onclick="closeMarkerModal()" class="text-slate-400 hover:text-white">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="p-5 space-y-3">
+      <div>
+        <label class="text-xs text-slate-400 mb-1 block">รหัส / ชื่อ</label>
+        <input id="editName" type="text" class="input-field" placeholder="เช่น CAM-01">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 mb-1 block">ประเภท</label>
+        <select id="editType" class="input-field">
+          <option value="cctv">📹 กล้อง CCTV</option>
+          <option value="nvr">🗄️ NVR / Server</option>
+          <option value="switch">🔲 Switch / Rack</option>
+          <option value="junction">📦 Junction Box</option>
+          <option value="route">📍 จุดหักเลี้ยว</option>
+          <option value="custom">⚪ จุดกำหนดเอง</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div>
+          <label class="text-xs text-slate-400 mb-1 block">Latitude</label>
+          <input id="editLat" type="number" step="0.000001" class="input-field mono text-xs">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 mb-1 block">Longitude</label>
+          <input id="editLng" type="number" step="0.000001" class="input-field mono text-xs">
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 mb-1 block">ความสูงติดตั้ง (ม.)</label>
+        <input id="editElevation" type="number" step="0.1" class="input-field" placeholder="เช่น 3.5">
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 mb-1 block">เชื่อมต่อกับ (อุปกรณ์ต้นทาง)</label>
+        <select id="editConnectedTo" class="input-field">
+          <option value="">-- ไม่ระบุ --</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs text-slate-400 mb-1 block">หมายเหตุ</label>
+        <textarea id="editNotes" class="input-field" rows="2" placeholder="บันทึกเพิ่มเติม..."></textarea>
+      </div>
+    </div>
+    <div class="p-5 border-t border-slate-700/50 flex gap-2">
+      <button onclick="deleteCurrentMarker()" class="btn-danger flex-1">🗑️ ลบ</button>
+      <button onclick="closeMarkerModal()" class="btn-secondary flex-1">ยกเลิก</button>
+      <button onclick="saveMarkerEdit()" class="btn-primary flex-1">💾 บันทึก</button>
+    </div>
+  </div>
+</div>
+
+<!-- Cable route editing is intentionally disabled. Routes can be selected or deleted, not edited. -->
+<!-- Hidden file input -->
+<input type="file" id="importFile" accept=".json" class="hidden">
+
+<script>
+// ============ STATE ============
+const state = {
+  project: {
+    name: 'โครงการใหม่',
+    markers: [],
+    cables: [],
+    settings: {
+      sparePercent: 10,
+      endAllowance: 3,
+      verticalAllowance: 2
+    }
+  },
+  mode: 'select',
+  selectedMarkerId: null,
+  selectedCableId: null,
+  currentEditMarkerId: null,
+  currentEditCableId: null,
+  drawingCable: null,
+  measuringLine: null,
+  undoStack: [],
+  redoStack: [],
+  basemapIndex: 0,
+  counters: { cctv: 0, nvr: 0, switch: 0, junction: 0, route: 0, custom: 0, cable: 0 }
+};
+
+const typeConfig = {
+  cctv: { label: 'CCTV', icon: '📹', color: '#ef4444', prefix: 'CAM' },
+  nvr: { label: 'NVR', icon: '🗄️', color: '#a855f7', prefix: 'NVR' },
+  switch: { label: 'Switch', icon: '🔲', color: '#3b82f6', prefix: 'SW' },
+  junction: { label: 'Junction', icon: '📦', color: '#f59e0b', prefix: 'JB' },
+  route: { label: 'Route', icon: '📍', color: '#22c55e', prefix: 'RT' },
+  custom: { label: 'Custom', icon: '⚪', color: '#64748b', prefix: 'PT' }
+};
+
+// ============ MAP INIT ============
+const map = L.map('map', {
+  center: [13.7563, 100.5018],
+  zoom: 14,
+  zoomControl: false
+});
+
+L.control.zoom({ position: 'topright' }).addTo(map);
+
+const basemaps = [
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    maxZoom: 19
+  }),
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    attribution: 'Tiles © Esri',
+    maxZoom: 19
+  }),
+  L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenTopoMap (CC-BY-SA)',
+    maxZoom: 17
+  })
+];
+basemaps[0].addTo(map);
+let currentBasemap = basemaps[0];
+
+// Layers
+const markersLayer = L.layerGroup().addTo(map);
+const cablesLayer = L.layerGroup().addTo(map);
+const tempLayer = L.layerGroup().addTo(map);
+
+// ============ HELPERS ============
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
+}
+
+function toast(msg, type = 'info') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast ${type} show`;
+  setTimeout(() => t.classList.remove('show'), 2500);
+}
+
+function calcDistance(latlng1, latlng2) {
+  const from = turf.point([latlng1.lng, latlng1.lat]);
+  const to = turf.point([latlng2.lng, latlng2.lat]);
+  return turf.distance(from, to, { units: 'meters' });
+}
+
+function calcPolylineDistance(points) {
+  let total = 0;
+  for (let i = 0; i < points.length - 1; i++) {
+    total += calcDistance(
+      L.latLng(points[i][0], points[i][1]),
+      L.latLng(points[i+1][0], points[i+1][1])
+    );
+  }
+  return total;
+}
+
+function formatDistance(meters) {
+  if (meters >= 1000) return (meters / 1000).toFixed(3) + ' กม.';
+  return meters.toFixed(2) + ' ม.';
+}
+
+function pushUndo() {
+  state.undoStack.push(JSON.stringify(state.project));
+  if (state.undoStack.length > 50) state.undoStack.shift();
+  state.redoStack = [];
+}
+
+function undo() {
+  if (state.undoStack.length === 0) { toast('ไม่มีการกระทำให้ย้อนกลับ', 'info'); return; }
+  state.redoStack.push(JSON.stringify(state.project));
+  state.project = normalizeProject(JSON.parse(state.undoStack.pop()));
+  reloadAll();
+  syncSettingsUI();
+  toast('↶ ย้อนกลับสำเร็จ', 'success');
+}
+
+function redo() {
+  if (state.redoStack.length === 0) { toast('ไม่มีการกระทำให้ทำซ้ำ', 'info'); return; }
+  state.undoStack.push(JSON.stringify(state.project));
+  state.project = normalizeProject(JSON.parse(state.redoStack.pop()));
+  reloadAll();
+  syncSettingsUI();
+  toast('↷ ทำซ้ำสำเร็จ', 'success');
+}
+
+// ============ MARKERS ============
+function createMarkerIcon(type, label, selected = false) {
+  const cfg = typeConfig[type];
+  return L.divIcon({
+    className: 'leaflet-div-icon',
+    html: `<div class="custom-marker ${selected ? 'selected' : ''}" style="background: ${cfg.color};">${cfg.icon}</div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14]
+  });
+}
+
+function addMarker(type, latlng, data = {}) {
+  pushUndo();
+  state.counters[type]++;
+  const cfg = typeConfig[type];
+  const marker = {
+    id: generateId(),
+    type: type,
+    name: data.name || `${cfg.prefix}-${String(state.counters[type]).padStart(2, '0')}`,
+    lat: latlng.lat,
+    lng: latlng.lng,
+    elevation: data.elevation || null,
+    notes: data.notes || '',
+    connectedTo: data.connectedTo || '',
+    createdAt: Date.now()
+  };
+  state.project.markers.push(marker);
+  renderMarker(marker);
+  updateUI();
+  toast(`✓ เพิ่ม ${cfg.label}: ${marker.name}`, 'success');
+  return marker;
+}
+
+function renderMarker(marker) {
+  const existing = markersLayer.getLayers().find(l => l._markerId === marker.id);
+  if (existing) markersLayer.removeLayer(existing);
+
+  const isSelected = state.selectedMarkerId === marker.id;
+  const m = L.marker([marker.lat, marker.lng], {
+    icon: createMarkerIcon(marker.type, marker.name, isSelected),
+    draggable: state.mode === 'select'
+  });
+  m._markerId = marker.id;
+
+  m.on('click', (e) => {
+    L.DomEvent.stopPropagation(e);
+    if (state.mode === 'select') {
+      selectMarker(marker.id);
+      openMarkerModal(marker.id);
+    } else if (state.mode === 'cable') {
+      addToCable(marker);
+    }
+  });
+
+  m.on('dragstart', () => {
+    pushUndo();
+  });
+
+  m.on('dragend', (e) => {
+    const pos = e.target.getLatLng();
+    marker.lat = pos.lat;
+    marker.lng = pos.lng;
+    updateCablesFromMarker(marker.id);
+    updateUI();
+  });
+
+  m.bindTooltip(marker.name, {
+    permanent: false,
+    direction: 'top',
+    offset: [0, -18],
+    className: 'distance-label'
+  });
+
+  m.addTo(markersLayer);
+}
+
+function selectMarker(id) {
+  state.selectedMarkerId = id;
+  markersLayer.getLayers().forEach(l => {
+    if (l._markerId) {
+      const mk = state.project.markers.find(m => m.id === l._markerId);
+      if (mk) l.setIcon(createMarkerIcon(mk.type, mk.name, mk.id === id));
+    }
+  });
+  updateUI();
+}
+
+function deleteMarker(id) {
+  pushUndo();
+  state.project.markers = state.project.markers.filter(m => m.id !== id);
+  state.project.cables = state.project.cables.filter(c => c.from !== id && c.to !== id);
+  const layer = markersLayer.getLayers().find(l => l._markerId === id);
+  if (layer) markersLayer.removeLayer(layer);
+  reloadCables();
+  updateUI();
+  toast('🗑️ ลบจุดแล้ว', 'success');
+}
+
+// ============ CABLES ============
+function addToCable(marker) {
+  if (!state.drawingCable) {
+    state.drawingCable = {
+      id: generateId(),
+      name: '',
+      points: [[marker.lat, marker.lng]],
+      from: marker.id,
+      to: null,
+      type: 'utp'
+    };
+    state.counters.cable++;
+    state.drawingCable.name = `Cable-${String(state.counters.cable).padStart(2, '0')}`;
+    toast(`🧵 เริ่มวาดแนวสายจาก ${marker.name} — คลิกจุดถัดไป หรือคลิกหมุดเพื่อสิ้นสุด`, 'info');
+    showHelp(`กำลังวาดสายจาก ${marker.name} — คลิกเพิ่มจุดหักเลี้ยว หรือคลิกหมุดปลายทางเพื่อสิ้นสุด`);
+    renderTempCable();
+  } else {
+    // Check if clicking same marker or different marker
+    if (marker.id === state.drawingCable.from) {
+      toast('ไม่สามารถเชื่อมกลับจุดเริ่มต้นได้', 'error');
+      return;
+    }
+    state.drawingCable.points.push([marker.lat, marker.lng]);
+    state.drawingCable.to = marker.id;
+    pushUndo();
+    state.project.cables.push({ ...state.drawingCable });
+    state.drawingCable = null;
+    tempLayer.clearLayers();
+    renderCable(state.project.cables[state.project.cables.length - 1]);
+    hideHelp();
+    toast('✓ วาดแนวสายเสร็จสิ้น', 'success');
+    updateUI();
+  }
+}
+
+function renderCable(cable) {
+  const existing = cablesLayer.getLayers().find(l => l._cableId === cable.id);
+  if (existing) cablesLayer.removeLayer(existing);
+
+  const isSelected = state.selectedCableId === cable.id;
+  const polyline = L.polyline(cable.points, {
+    color: isSelected ? '#fbbf24' : '#f97316',
+    weight: isSelected ? 5 : 4,
+    opacity: 0.85,
+    dashArray: isSelected ? null : '8, 6'
+  });
+  polyline._cableId = cable.id;
+
+  polyline.on('click', (e) => {
+    L.DomEvent.stopPropagation(e);
+    if (state.mode === 'select') {
+      selectCable(cable.id);
+      toast('เลือกแนวสายแล้ว — แนวสายไม่สามารถแก้ไขได้', 'info');
+    }
+  });
+
+  const dist = calcPolylineDistance(cable.points);
+  const midIdx = Math.floor(cable.points.length / 2);
+  const midPoint = cable.points[midIdx];
+
+  const label = L.marker(midPoint, {
+    icon: L.divIcon({
+      className: 'leaflet-div-icon',
+      html: `<div class="distance-label">${dist.toFixed(1)} ม.</div>`,
+      iconSize: [60, 20],
+      iconAnchor: [30, 10]
+    }),
+    interactive: false
+  });
+
+  const group = L.layerGroup([polyline, label]);
+  group._cableId = cable.id;
+  group.addTo(cablesLayer);
+}
+
+function renderTempCable() {
+  tempLayer.clearLayers();
+  if (!state.drawingCable) return;
+  const polyline = L.polyline(state.drawingCable.points, {
+    color: '#fbbf24',
+    weight: 4,
+    dashArray: '5, 5',
+    opacity: 0.9
+  });
+  polyline.addTo(tempLayer);
+
+  if (state.drawingCable.points.length > 1) {
+    const dist = calcPolylineDistance(state.drawingCable.points);
+    const midIdx = Math.floor(state.drawingCable.points.length / 2);
+    L.marker(state.drawingCable.points[midIdx], {
+      icon: L.divIcon({
+        className: 'leaflet-div-icon',
+        html: `<div class="distance-label" style="background: rgba(251, 191, 36, 0.9); color: #0f172a;">${dist.toFixed(1)} ม. (กำลังวาด)</div>`,
+        iconSize: [100, 20],
+        iconAnchor: [50, 10]
+      }),
+      interactive: false
+    }).addTo(tempLayer);
+  }
+}
+
+function updateCablesFromMarker(markerId) {
+  state.project.cables.forEach(cable => {
+    const fromMarker = state.project.markers.find(m => m.id === cable.from);
+    const toMarker = state.project.markers.find(m => m.id === cable.to);
+    if (fromMarker && cable.points.length > 0) {
+      cable.points[0] = [fromMarker.lat, fromMarker.lng];
+    }
+    if (toMarker && cable.points.length > 1) {
+      cable.points[cable.points.length - 1] = [toMarker.lat, toMarker.lng];
+    }
+  });
+  reloadCables();
+}
+
+function selectCable(id) {
+  state.selectedCableId = id;
+  reloadCables();
+}
+
+function confirmDeleteCable(id) {
+  const cable = state.project.cables.find(c => c.id === id);
+  if (!cable) return;
+  if (!confirm(`ยืนยันการลบแนวสาย ${cable.name}?`)) return;
+  deleteCable(id);
+}
+
+function deleteCable(id) {
+  pushUndo();
+  state.project.cables = state.project.cables.filter(c => c.id !== id);
+  reloadCables();
+  updateUI();
+  toast('🗑️ ลบแนวสายแล้ว', 'success');
+}
+
+// Rebuild ID counters after loading/importing/undoing so newly added items don't duplicate IDs.
+function recalculateCounters() {
+  const next = { cctv: 0, nvr: 0, switch: 0, junction: 0, route: 0, custom: 0, cable: 0 };
+  const prefixes = { cctv: 'CAM', nvr: 'NVR', switch: 'SW', junction: 'JB', route: 'RT', custom: 'PT', cable: 'Cable' };
+  state.project.markers.forEach(marker => {
+    const prefix = prefixes[marker.type];
+    const match = prefix && String(marker.name || '').match(new RegExp('^' + prefix + '-?(\\d+)$', 'i'));
+    if (match) next[marker.type] = Math.max(next[marker.type], Number(match[1]) || 0);
+  });
+  state.project.cables.forEach(cable => {
+    const match = String(cable.name || '').match(/^Cable-?(\d+)$/i);
+    if (match) next.cable = Math.max(next.cable, Number(match[1]) || 0);
+  });
+  Object.keys(next).forEach(key => state.counters[key] = Math.max(state.counters[key] || 0, next[key]));
+}
+
+// ============ RENDER ALL ============
+function reloadAll() {
+  recalculateCounters();
+  markersLayer.clearLayers();
+  cablesLayer.clearLayers();
+  tempLayer.clearLayers();
+  state.project.markers.forEach(m => renderMarker(m));
+  state.project.cables.forEach(c => renderCable(c));
+  updateUI();
+}
+
+function reloadCables() {
+  cablesLayer.clearLayers();
+  state.project.cables.forEach(c => renderCable(c));
+}
+
+// ============ UI UPDATE ============
+function updateUI() {
+  const markers = state.project.markers;
+  const cables = state.project.cables;
+
+  // Counts
+  document.getElementById('sumCameras').textContent = markers.filter(m => m.type === 'cctv').length;
+  document.getElementById('sumSwitches').textContent = markers.filter(m => m.type === 'switch').length;
+  document.getElementById('sumNVRs').textContent = markers.filter(m => m.type === 'nvr').length;
+  document.getElementById('sumJunctions').textContent = markers.filter(m => m.type === 'junction').length;
+
+  // Cable calculations:
+  // - Project totals count every saved cable exactly once (including backbone/trunk segments).
+  // - Per-camera rows show only the cable whose destination is that camera.
+  // - A straight-line estimate is shown only when connectedTo exists and no direct cable exists.
+  const cableLengths = new Map(cables.map(c => [c.id, calcPolylineDistance(c.points)]));
+  const totalCableLength = cables.reduce((sum, c) => sum + (cableLengths.get(c.id) || 0), 0);
+  const cameraDetails = [];
+
+  markers.filter(m => m.type === 'cctv').forEach(cam => {
+    const cable = cables.find(c => c.to === cam.id);
+    let routeDistance = 0;
+    let cableName = '—';
+    let cableType = '—';
+    let hasCable = false;
+
+    if (cable) {
+      routeDistance = cableLengths.get(cable.id) || 0;
+      cableName = cable.name;
+      cableType = cable.type || 'utp';
+      hasCable = true;
+    } else if (cam.connectedTo) {
+      const target = markers.find(m => m.id === cam.connectedTo);
+      if (target) {
+        routeDistance = calcDistance(L.latLng(cam.lat, cam.lng), L.latLng(target.lat, target.lng));
+        cableName = '(ประมาณจากเส้นตรง)';
+      }
+    }
+
+    const endAllow = Math.max(0, Number(state.project.settings.endAllowance) || 0);
+    const vertAllow = Math.max(0, Number(state.project.settings.verticalAllowance) || 0);
+    const allowance = endAllow + vertAllow;
+    const sparePercent = Math.min(100, Math.max(0, Number(state.project.settings.sparePercent) || 0));
+    const recommended = (routeDistance + allowance) * (1 + sparePercent / 100);
+
+    cameraDetails.push({
+      cam, routeDistance, cableName,
+      cableType: typeConfig[cableType]?.label || cableType,
+      allowance, sparePercent, recommended, hasCable
+    });
+  });
+
+  // Allowance is applied per camera. Spare is calculated across all cable routes plus camera allowances.
+  const totalAllowance = cameraDetails.reduce((sum, d) => sum + d.allowance, 0);
+  const baseWithAllowance = totalCableLength + totalAllowance;
+  const sparePercent = Math.min(100, Math.max(0, Number(state.project.settings.sparePercent) || 0));
+  const totalSpare = baseWithAllowance * sparePercent / 100;
+  const totalRecommended = baseWithAllowance + totalSpare;
+
+  document.getElementById('sumCableLength').textContent = formatDistance(totalCableLength);
+  document.getElementById('sumAllowance').textContent = formatDistance(totalAllowance);
+  document.getElementById('sumSpare').textContent = formatDistance(totalSpare);
+  document.getElementById('sumSparePercent').textContent = sparePercent;
+  document.getElementById('sumTotal').textContent = formatDistance(totalRecommended);
+  document.getElementById('sumTotalKm').textContent = (totalRecommended / 1000).toFixed(3) + ' กม.';
+
+  // Camera table
+  const tableEl = document.getElementById('cameraTable');
+  if (cameraDetails.length === 0) {
+    tableEl.innerHTML = '<div class="text-slate-500 text-center py-4 text-xs">ยังไม่มีกล้อง</div>';
+  } else {
+    tableEl.innerHTML = `
+      <div class="space-y-1.5">
+        ${cameraDetails.map(d => `
+          <div class="p-2 bg-slate-800/40 rounded-lg cursor-pointer hover:bg-slate-800/70 transition" onclick="focusMarker('${d.cam.id}')">
+            <div class="flex items-center justify-between mb-1">
+              <span class="font-bold text-white">${d.cam.name}</span>
+              ${!d.hasCable ? '<span class="badge bg-amber-500/20 text-amber-400">⚠ ยังไม่มีสาย</span>' : '<span class="badge bg-green-500/20 text-green-400">✓ มีสาย</span>'}
+            </div>
+            <div class="grid grid-cols-2 gap-1 text-[10px] text-slate-400">
+              <div>แนวสาย: <span class="mono text-amber-400">${d.routeDistance.toFixed(1)} ม.</span></div>
+              <div>เผื่อ: <span class="mono text-blue-400">${d.allowance.toFixed(1)} ม.</span></div>
+              <div>สำรอง: <span class="mono text-purple-400">${d.sparePercent}%</span></div>
+              <div>แนะนำ: <span class="mono text-green-400 font-bold">${d.recommended.toFixed(1)} ม.</span></div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  // Device list
+  const deviceList = document.getElementById('deviceList');
+  document.getElementById('deviceCount').textContent = markers.length;
+  if (markers.length === 0) {
+    deviceList.innerHTML = '<div class="text-slate-500 text-center py-4 text-xs">ยังไม่มีอุปกรณ์</div>';
+  } else {
+    deviceList.innerHTML = markers.map(m => {
+      const cfg = typeConfig[m.type];
+      const cable = cables.find(c => c.from === m.id || c.to === m.id);
+      return `
+        <div class="device-item ${state.selectedMarkerId === m.id ? 'selected' : ''}" onclick="focusMarker('${m.id}')">
+          <span class="type-dot" style="background: ${cfg.color}"></span>
+          <div class="flex-1 min-w-0">
+            <div class="font-semibold truncate">${m.name}</div>
+            <div class="text-[10px] text-slate-400">${cfg.label}${cable ? ' · ' + cable.name : ''}</div>
+          </div>
+          <button onclick="event.stopPropagation(); editMarkerById('${m.id}')" class="text-slate-400 hover:text-white p-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+          </button>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Cable list
+  const cableList = document.getElementById('cableList');
+  document.getElementById('cableCount').textContent = cables.length;
+  if (cables.length === 0) {
+    cableList.innerHTML = '<div class="text-slate-500 text-center py-4 text-xs">ยังไม่มีแนวสาย</div>';
+  } else {
+    cableList.innerHTML = cables.map(c => {
+      const fromM = markers.find(m => m.id === c.from);
+      const toM = markers.find(m => m.id === c.to);
+      const dist = calcPolylineDistance(c.points);
+      return `
+        <div class="device-item ${state.selectedCableId === c.id ? 'selected' : ''}" onclick="focusCable('${c.id}')">
+          <span class="w-4 h-0.5 bg-amber-400"></span>
+          <div class="flex-1 min-w-0">
+            <div class="font-semibold truncate">${c.name}</div>
+            <div class="text-[10px] text-slate-400">${fromM?.name || '?'} → ${toM?.name || '?'} · <span class="mono text-amber-400">${dist.toFixed(1)} ม.</span></div>
+          </div>
+          <button title="ลบแนวสาย" aria-label="ลบแนวสาย ${c.name}" onclick="event.stopPropagation(); confirmDeleteCable('${c.id}')" class="text-red-400 hover:text-red-300 p-1">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 7h12m-10 0V5h8v2m-9 0 1 12h6l1-12M10 11v5m4-5v5"/></svg>
+          </button>
+        </div>
+      `;
+    }).join('');
+  }
+}
+
+function focusMarker(id) {
+  const m = state.project.markers.find(x => x.id === id);
+  if (!m) return;
+  selectMarker(id);
+  map.setView([m.lat, m.lng], Math.max(map.getZoom(), 17));
+  switchTab('devices');
+}
+
+function focusCable(id) {
+  const c = state.project.cables.find(x => x.id === id);
+  if (!c) return;
+  selectCable(id);
+  const bounds = L.latLngBounds(c.points.map(p => L.latLng(p[0], p[1])));
+  map.fitBounds(bounds, { padding: [50, 50] });
+  switchTab('devices');
+}
+
+function editMarkerById(id) {
+  selectMarker(id);
+  openMarkerModal(id);
+}
+
+
+// ============ MODALS ============
+function openMarkerModal(id) {
+  const m = state.project.markers.find(x => x.id === id);
+  if (!m) return;
+  state.currentEditMarkerId = id;
+  document.getElementById('modalTitle').textContent = `แก้ไข: ${m.name}`;
+  document.getElementById('editName').value = m.name;
+  document.getElementById('editType').value = m.type;
+  document.getElementById('editLat').value = m.lat;
+  document.getElementById('editLng').value = m.lng;
+  document.getElementById('editElevation').value = m.elevation || '';
+  document.getElementById('editNotes').value = m.notes || '';
+
+  // Populate connectedTo dropdown
+  const sel = document.getElementById('editConnectedTo');
+  sel.innerHTML = '<option value="">-- ไม่ระบุ --</option>';
+  state.project.markers
+    .filter(x => x.id !== id && ['nvr', 'switch', 'junction'].includes(x.type))
+    .forEach(x => {
+      const opt = document.createElement('option');
+      opt.value = x.id;
+      opt.textContent = `${typeConfig[x.type].icon} ${x.name}`;
+      if (x.id === m.connectedTo) opt.selected = true;
+      sel.appendChild(opt);
+    });
+
+  document.getElementById('markerModal').classList.remove('hidden');
+}
+
+function closeMarkerModal() {
+  document.getElementById('markerModal').classList.add('hidden');
+  state.currentEditMarkerId = null;
+}
+
+function saveMarkerEdit() {
+  const m = state.project.markers.find(x => x.id === state.currentEditMarkerId);
+  if (!m) return;
+
+  const lat = Number(document.getElementById('editLat').value);
+  const lng = Number(document.getElementById('editLng').value);
+  if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+    toast('พิกัดไม่ถูกต้อง: Latitude ต้องอยู่ระหว่าง -90 ถึง 90 และ Longitude -180 ถึง 180', 'error');
+    return;
+  }
+
+  pushUndo();
+  m.name = document.getElementById('editName').value.trim() || m.name;
+  m.type = document.getElementById('editType').value;
+  m.lat = lat;
+  m.lng = lng;
+  m.elevation = parseFloat(document.getElementById('editElevation').value) || null;
+  m.notes = document.getElementById('editNotes').value;
+  m.connectedTo = document.getElementById('editConnectedTo').value;
+  renderMarker(m);
+  updateCablesFromMarker(m.id);
+  recalculateCounters();
+  updateUI();
+  closeMarkerModal();
+  toast('💾 บันทึกแล้ว', 'success');
+}
+
+function deleteCurrentMarker() {
+  if (!confirm('ยืนยันการลบจุดนี้? แนวสายที่เชื่อมอยู่จะถูกลบด้วย')) return;
+  deleteMarker(state.currentEditMarkerId);
+  closeMarkerModal();
+}
+
+
+// ============ MODE MANAGEMENT ============
+function setMode(mode) {
+  state.mode = mode;
+  document.querySelectorAll('.tool-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === mode);
+  });
+
+  const indicator = document.getElementById('modeIndicator');
+  const modeText = document.getElementById('modeText');
+  const modeLabels = {
+    cctv: '📹 โหมดเพิ่มกล้อง — คลิกบนแผนที่',
+    nvr: '🗄️ โหมดเพิ่ม NVR — คลิกบนแผนที่',
+    switch: '🔲 โหมดเพิ่ม Switch — คลิกบนแผนที่',
+    junction: '📦 โหมดเพิ่ม Junction — คลิกบนแผนที่',
+    route: '📍 โหมดเพิ่มจุดหักเลี้ยว — คลิกบนแผนที่',
+    custom: '⚪ โหมดเพิ่มจุดกำหนดเอง — คลิกบนแผนที่',
+    cable: '🧵 โหมดวาดแนวสาย — คลิกหมุดเริ่มต้น',
+    measure: '📏 โหมดวัดระยะ — คลิกจุดเริ่มต้นและปลายทาง',
+    select: '👆 โหมดเลือก — คลิกหมุดเพื่อดู/แก้ไขรายละเอียด'
+  };
+
+  if (mode !== 'select') {
+    indicator.classList.remove('hidden');
+    modeText.textContent = modeLabels[mode];
+    showHelp(getHelpText(mode));
+  } else {
+    indicator.classList.add('hidden');
+    hideHelp();
+  }
+
+  // Cancel drawing if switching mode
+  if (mode !== 'cable' && state.drawingCable) {
+    state.drawingCable = null;
+    tempLayer.clearLayers();
+    hideHelp();
+  }
+  if (mode !== 'measure' && state.measuringLine) {
+    state.measuringLine = null;
+    tempLayer.clearLayers();
+  }
+
+  // Update marker draggable
+  markersLayer.getLayers().forEach(l => {
+    if (l.dragging) {
+      if (mode === 'select') l.dragging.enable();
+      else l.dragging.disable();
+    }
+  });
+}
+
+function getHelpText(mode) {
+  const texts = {
+    cctv: '📹 คลิกบนแผนที่เพื่อวางตำแหน่งกล้อง',
+    nvr: '🗄️ คลิกบนแผนที่เพื่อวางตำแหน่ง NVR',
+    switch: '🔲 คลิกบนแผนที่เพื่อวางตำแหน่ง Switch',
+    junction: '📦 คลิกบนแผนที่เพื่อวางตำแหน่ง Junction Box',
+    route: '📍 คลิกบนแผนที่เพื่อวางจุดหักเลี้ยว',
+    custom: '⚪ คลิกบนแผนที่เพื่อวางจุดกำหนดเอง',
+    cable: '🧵 คลิกหมุดเริ่มต้น → คลิกเพิ่มจุดหักเลี้ยว → คลิกหมุดปลายทางเพื่อสิ้นสุด',
+    measure: '📏 คลิกจุดเริ่มต้น แล้วคลิกจุดปลายทางเพื่อวัดระยะเส้นตรง',
+    select: '👆 คลิกหมุดเพื่อแก้ไขรายละเอียด · ลากหมุดเพื่อย้ายตำแหน่ง (แนวสายจะตามเฉพาะปลายสาย)'
+  };
+  return texts[mode] || '';
+}
+
+function showHelp(text) {
+  const el = document.getElementById('helpTip');
+  document.getElementById('helpText').textContent = text;
+  el.classList.remove('hidden');
+}
+function hideHelp() {
+  document.getElementById('helpTip').classList.add('hidden');
+}
+
+// ============ MAP EVENTS ============
+map.on('click', (e) => {
+  const { lat, lng } = e.latlng;
+  document.getElementById('coordsText').textContent = `📍 ${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+
+  if (['cctv', 'nvr', 'switch', 'junction', 'route', 'custom'].includes(state.mode)) {
+    addMarker(state.mode, e.latlng);
+    return;
+  }
+
+  if (state.mode === 'cable' && state.drawingCable) {
+    // Add intermediate point
+    state.drawingCable.points.push([lat, lng]);
+    renderTempCable();
+    return;
+  }
+
+  if (state.mode === 'measure') {
+    if (!state.measuringLine) {
+      state.measuringLine = [e.latlng];
+      const marker = L.circleMarker(e.latlng, {
+        radius: 6, color: '#fbbf24', fillColor: '#fbbf24', fillOpacity: 1
+      }).addTo(tempLayer);
+      showHelp('📏 คลิกจุดปลายทางเพื่อวัดระยะ');
+    } else {
+      state.measuringLine.push(e.latlng);
+      tempLayer.clearLayers();
+      const polyline = L.polyline(state.measuringLine, {
+        color: '#fbbf24', weight: 3, dashArray: '5, 5'
+      }).addTo(tempLayer);
+      state.measuringLine.forEach(p => {
+        L.circleMarker(p, {
+          radius: 6, color: '#fbbf24', fillColor: '#fbbf24', fillOpacity: 1
+        }).addTo(tempLayer);
+      });
+      const dist = calcDistance(state.measuringLine[0], state.measuringLine[1]);
+      const mid = L.latLng(
+        (state.measuringLine[0].lat + state.measuringLine[1].lat) / 2,
+        (state.measuringLine[0].lng + state.measuringLine[1].lng) / 2
+      );
+      L.marker(mid, {
+        icon: L.divIcon({
+          className: 'leaflet-div-icon',
+          html: `<div class="distance-label" style="background: rgba(251, 191, 36, 0.95); color: #0f172a;">📏 ${dist.toFixed(2)} ม. (เส้นตรง)</div>`,
+          iconSize: [150, 20],
+          iconAnchor: [75, 10]
+        }),
+        interactive: false
+      }).addTo(tempLayer);
+      toast(`📏 ระยะเส้นตรง: ${dist.toFixed(2)} เมตร (ไม่ใช่ระยะเดินสายจริง)`, 'info');
+      state.measuringLine = null;
+      setTimeout(() => {
+        if (state.mode === 'measure') showHelp('📏 คลิกจุดเริ่มต้นเพื่อวัดระยะใหม่');
+      }, 3000);
+    }
+    return;
+  }
+});
+
+// ============ SEARCH ============
+let searchTimeout;
+document.getElementById('searchInput').addEventListener('input', (e) => {
+  clearTimeout(searchTimeout);
+  const q = e.target.value.trim();
+  if (q.length < 3) {
+    document.getElementById('searchResults').classList.remove('show');
+    return;
+  }
+  searchTimeout = setTimeout(() => searchLocation(q), 400);
+});
+
+async function searchLocation(query) {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&accept-language=th`);
+    const data = await res.json();
+    const resultsEl = document.getElementById('searchResults');
+    if (data.length === 0) {
+      resultsEl.innerHTML = '<div class="search-item text-slate-500">ไม่พบผลลัพธ์</div>';
+    } else {
+      resultsEl.innerHTML = data.map(d => `
+        <div class="search-item" onclick="goToSearchResult(${d.lat}, ${d.lon}, '${d.display_name.replace(/'/g, "\\'")}')">
+          <div class="font-semibold text-white text-xs">${d.display_name.split(',')[0]}</div>
+          <div class="text-[10px] text-slate-400 truncate">${d.display_name}</div>
+        </div>
+      `).join('');
+    }
+    resultsEl.classList.add('show');
+  } catch (err) {
+    toast('❌ ไม่สามารถค้นหาได้ (ตรวจสอบอินเทอร์เน็ต)', 'error');
+  }
+}
+
+window.goToSearchResult = function(lat, lon, name) {
+  map.setView([lat, lon], 17);
+  document.getElementById('searchResults').classList.remove('show');
+  document.getElementById('searchInput').value = name.split(',')[0];
+  toast(`📍 ไปยัง: ${name.split(',')[0]}`, 'success');
+};
+
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('.search-box')) {
+    document.getElementById('searchResults').classList.remove('show');
+  }
+});
+
+// ============ BASEMAP ============
+document.getElementById('btnBasemap').addEventListener('click', () => {
+  map.removeLayer(currentBasemap);
+  state.basemapIndex = (state.basemapIndex + 1) % basemaps.length;
+  currentBasemap = basemaps[state.basemapIndex];
+  currentBasemap.addTo(map);
+  const names = ['🗺️ แผนที่ถนน', '🛰️ ภาพถ่ายดาวเทียม', '⛰️ แผนที่ภูมิประเทศ'];
+  toast(names[state.basemapIndex], 'info');
+});
+
+// ============ FIT ALL ============
+document.getElementById('btnFitAll').addEventListener('click', () => {
+  const allPoints = [];
+  state.project.markers.forEach(m => allPoints.push([m.lat, m.lng]));
+  state.project.cables.forEach(c => c.points.forEach(p => allPoints.push(p)));
+  if (allPoints.length === 0) {
+    toast('ยังไม่มีข้อมูลในแผนที่', 'info');
+    return;
+  }
+  const bounds = L.latLngBounds(allPoints);
+  map.fitBounds(bounds, { padding: [50, 50] });
+});
+
+// ============ TABS ============
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+  document.getElementById('tab-' + tab).classList.remove('hidden');
+}
+document.querySelectorAll('.tab-btn').forEach(b => {
+  b.addEventListener('click', () => switchTab(b.dataset.tab));
+});
+
+// ============ TOOL BUTTONS ============
+document.querySelectorAll('.tool-btn').forEach(b => {
+  b.addEventListener('click', () => setMode(b.dataset.mode));
+});
+
+document.getElementById('btnCancelMode').addEventListener('click', () => setMode('select'));
+
+// ============ SETTINGS ============
+document.querySelectorAll('.spare-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.spare-btn').forEach(x => {
+      x.classList.remove('active');
+      x.style.background = '';
+      x.style.color = '';
+    });
+    b.classList.add('active');
+    b.style.background = 'linear-gradient(135deg, #3b82f6, #6366f1)';
+    b.style.color = 'white';
+    state.project.settings.sparePercent = parseFloat(b.dataset.val);
+    document.getElementById('customSpare').value = '';
+    updateUI();
+  });
+});
+
+document.getElementById('customSpare').addEventListener('input', (e) => {
+  const v = parseFloat(e.target.value);
+  if (!isNaN(v) && v >= 0 && v <= 100) {
+    state.project.settings.sparePercent = v;
+    document.querySelectorAll('.spare-btn').forEach(x => {
+      x.classList.remove('active');
+      x.style.background = '';
+      x.style.color = '';
+    });
+    updateUI();
+  }
+});
+
+document.getElementById('endAllowance').addEventListener('input', (e) => {
+  state.project.settings.endAllowance = parseFloat(e.target.value) || 0;
+  updateUI();
+});
+
+document.getElementById('verticalAllowance').addEventListener('input', (e) => {
+  state.project.settings.verticalAllowance = parseFloat(e.target.value) || 0;
+  updateUI();
+});
+
+document.getElementById('projectName').addEventListener('input', (e) => {
+  state.project.name = e.target.value;
+});
+
+
+function normalizeProject(project) {
+  if (!project || typeof project !== 'object') throw new Error('รูปแบบโครงการไม่ถูกต้อง');
+  const normalized = {
+    name: typeof project.name === 'string' ? project.name : 'โครงการใหม่',
+    markers: Array.isArray(project.markers) ? project.markers : [],
+    cables: Array.isArray(project.cables) ? project.cables : [],
+    settings: {
+      sparePercent: Number(project.settings?.sparePercent ?? 10),
+      endAllowance: Number(project.settings?.endAllowance ?? 3),
+      verticalAllowance: Number(project.settings?.verticalAllowance ?? 2)
+    }
+  };
+  normalized.settings.sparePercent = Math.min(100, Math.max(0, Number.isFinite(normalized.settings.sparePercent) ? normalized.settings.sparePercent : 10));
+  normalized.settings.endAllowance = Math.max(0, Number.isFinite(normalized.settings.endAllowance) ? normalized.settings.endAllowance : 3);
+  normalized.settings.verticalAllowance = Math.max(0, Number.isFinite(normalized.settings.verticalAllowance) ? normalized.settings.verticalAllowance : 2);
+  normalized.markers = normalized.markers.filter(m => m && typeof m.id === 'string' && typeConfig[m.type] && Number.isFinite(Number(m.lat)) && Number.isFinite(Number(m.lng))).map(m => ({...m, lat:Number(m.lat), lng:Number(m.lng)}));
+  const markerIds = new Set(normalized.markers.map(m => m.id));
+  normalized.cables = normalized.cables.filter(c => c && typeof c.id === 'string' && markerIds.has(c.from) && markerIds.has(c.to) && Array.isArray(c.points) && c.points.length >= 2 && c.points.every(p => Array.isArray(p) && p.length >= 2 && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1])))).map(c => ({...c, points:c.points.map(p => [Number(p[0]), Number(p[1])])}));
+  return normalized;
+}
+
+function syncSettingsUI() {
+  const settings = state.project.settings;
+  document.getElementById('projectName').value = state.project.name || 'โครงการใหม่';
+  document.getElementById('endAllowance').value = settings.endAllowance;
+  document.getElementById('verticalAllowance').value = settings.verticalAllowance;
+  const custom = document.getElementById('customSpare');
+  const preset = [5, 10, 15].includes(Number(settings.sparePercent));
+  custom.value = preset ? '' : settings.sparePercent;
+  document.querySelectorAll('.spare-btn').forEach(btn => {
+    const active = preset && Number(btn.dataset.val) === Number(settings.sparePercent);
+    btn.classList.toggle('active', active);
+    btn.style.background = active ? 'linear-gradient(135deg, #3b82f6, #6366f1)' : '';
+    btn.style.color = active ? 'white' : '';
+  });
+}
+
+// ============ SAVE / LOAD ============
+document.getElementById('btnSave').addEventListener('click', () => {
+  try {
+    localStorage.setItem('cctv_planner_project', JSON.stringify(state.project));
+    toast('💾 บันทึกโครงการแล้ว (LocalStorage)', 'success');
+  } catch (err) {
+    toast('❌ บันทึกไม่สำเร็จ: ' + err.message, 'error');
+  }
+});
+
+document.getElementById('btnLoad').addEventListener('click', () => {
+  try {
+    const data = localStorage.getItem('cctv_planner_project');
+    if (!data) { toast('ไม่พบข้อมูลที่บันทึกไว้', 'info'); return; }
+    pushUndo();
+    state.project = normalizeProject(JSON.parse(data));
+    reloadAll();
+    syncSettingsUI();
+    toast('📂 โหลดโครงการแล้ว', 'success');
+  } catch (err) {
+    toast('❌ โหลดไม่สำเร็จ: ' + err.message, 'error');
+  }
+});
+
+// ============ EXPORT / IMPORT ============
+document.getElementById('btnExportJSON').addEventListener('click', () => {
+  const data = JSON.stringify(state.project, null, 2);
+  const blob = new Blob([data], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${state.project.name || 'project'}_${Date.now()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('📤 ส่งออก JSON แล้ว', 'success');
+});
+
+document.getElementById('btnImportJSON').addEventListener('click', () => {
+  document.getElementById('importFile').click();
+});
+
+document.getElementById('importFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    try {
+      pushUndo();
+      state.project = normalizeProject(JSON.parse(ev.target.result));
+      reloadAll();
+      syncSettingsUI();
+      toast('📥 นำเข้าโครงการสำเร็จ', 'success');
+    } catch (err) {
+      toast('❌ ไฟล์ JSON ไม่ถูกต้อง', 'error');
+    }
+  };
+  reader.readAsText(file);
+  e.target.value = '';
+});
+
+document.getElementById('btnExportCSV').addEventListener('click', () => {
+  const rows = [['รหัส', 'ชื่อ', 'ประเภท', 'Latitude', 'Longitude', 'ความสูง(ม.)', 'เชื่อมกับ', 'ระยะตามแนวสาย(ม.)', 'ระยะเผื่อ(ม.)', 'สายสำรอง(%)', 'ระยะแนะนำ(ม.)', 'หมายเหตุ']];
+
+  state.project.markers.filter(m => m.type === 'cctv').forEach(cam => {
+    const cable = state.project.cables.find(c => c.to === cam.id);
+    let routeDistance = 0;
+    if (cable) routeDistance = calcPolylineDistance(cable.points);
+    const endAllow = parseFloat(state.project.settings.endAllowance) || 0;
+    const vertAllow = parseFloat(state.project.settings.verticalAllowance) || 0;
+    const allowance = endAllow + vertAllow;
+    const spare = state.project.settings.sparePercent;
+    const recommended = (routeDistance + allowance) * (1 + spare / 100);
+    const connected = cam.connectedTo ? (state.project.markers.find(m => m.id === cam.connectedTo)?.name || '') : '';
+
+    rows.push([
+      cam.name, cam.name, 'CCTV', cam.lat, cam.lng, cam.elevation || '',
+      connected, routeDistance.toFixed(2), allowance.toFixed(2), spare, recommended.toFixed(2),
+      (cam.notes || '').replace(/[\n\r]/g, ' ')
+    ]);
+  });
+
+  const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${state.project.name || 'project'}_cameras_${Date.now()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('📊 ส่งออก CSV แล้ว', 'success');
+});
+
+document.getElementById('btnExportPDF').addEventListener('click', () => {
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+
+    // Title
+    doc.setFontSize(18);
+    doc.setTextColor(234, 88, 12);
+    doc.text('CCTV Cable Planning Report', 14, 20);
+
+    doc.setFontSize(10);
+    doc.setTextColor(100);
+    doc.text(`Project: ${state.project.name}`, 14, 28);
+    doc.text(`Generated: ${new Date().toLocaleString('th-TH')}`, 14, 34);
+
+    // Summary
+    doc.setFontSize(12);
+    doc.setTextColor(0);
+    doc.text('Project Summary', 14, 46);
+
+    const markers = state.project.markers;
+    const cameras = markers.filter(m => m.type === 'cctv').length;
+    const switches = markers.filter(m => m.type === 'switch').length;
+    const nvrs = markers.filter(m => m.type === 'nvr').length;
+    const junctions = markers.filter(m => m.type === 'junction').length;
+
+    const allCables = state.project.cables;
+    const totalCable = allCables.reduce((sum, c) => sum + calcPolylineDistance(c.points), 0);
+    const endAllow = Math.max(0, Number(state.project.settings.endAllowance) || 0);
+    const vertAllow = Math.max(0, Number(state.project.settings.verticalAllowance) || 0);
+    const spare = Math.min(100, Math.max(0, Number(state.project.settings.sparePercent) || 0));
+    const camerasList = markers.filter(m => m.type === 'cctv');
+    const totalAllow = camerasList.length * (endAllow + vertAllow);
+    const totalRecommended = (totalCable + totalAllow) * (1 + spare / 100);
+    const camData = camerasList.map(cam => {
+      const cable = allCables.find(c => c.to === cam.id);
+      const routeDistance = cable ? calcPolylineDistance(cable.points) : 0;
+      const allowance = endAllow + vertAllow;
+      const recommended = (routeDistance + allowance) * (1 + spare / 100);
+      return [cam.name, routeDistance.toFixed(2), allowance.toFixed(2), spare + '%', recommended.toFixed(2)];
+    });
+
+    doc.setFontSize(10);
+    doc.text(`Cameras: ${cameras}`, 14, 54);
+    doc.text(`Switches: ${switches}`, 14, 60);
+    doc.text(`NVRs: ${nvrs}`, 14, 66);
+    doc.text(`Junction Boxes: ${junctions}`, 14, 72);
+    doc.text(`Total Cable Route: ${totalCable.toFixed(2)} m`, 14, 78);
+    doc.text(`Total Recommended: ${totalRecommended.toFixed(2)} m (${(totalRecommended/1000).toFixed(3)} km)`, 14, 84);
+
+    // Camera Table
+    if (camData.length > 0) {
+      doc.autoTable({
+        startY: 92,
+        head: [['Camera', 'Route (m)', 'Allowance (m)', 'Spare', 'Recommended (m)']],
+        body: camData,
+        theme: 'grid',
+        headStyles: { fillColor: [234, 88, 12] },
+        styles: { fontSize: 9 }
+      });
+    }
+
+    // Disclaimer
+    const finalY = doc.lastAutoTable ? doc.lastAutoTable.finalY + 10 : 100;
+    doc.setFontSize(8);
+    doc.setTextColor(150);
+    doc.text('NOTE: Distances are approximate based on map data. Actual site survey required before purchase and installation.', 14, finalY);
+    doc.text('Map data (c) OpenStreetMap contributors', 14, finalY + 5);
+
+    doc.save(`${state.project.name || 'project'}_report_${Date.now()}.pdf`);
+    toast('📄 ส่งออก PDF แล้ว', 'success');
+  } catch (err) {
+    toast('❌ ส่งออก PDF ไม่สำเร็จ: ' + err.message, 'error');
+  }
+});
+
+// ============ UNDO / REDO / CLEAR ============
+document.getElementById('btnUndo').addEventListener('click', undo);
+document.getElementById('btnRedo').addEventListener('click', redo);
+
+document.getElementById('btnClear').addEventListener('click', () => {
+  if (!confirm('⚠️ ยืนยันการล้างข้อมูลทั้งหมด?\nการกระทำนี้ไม่สามารถย้อนกลับได้')) return;
+  pushUndo();
+  state.project = {
+    name: 'โครงการใหม่',
+    markers: [],
+    cables: [],
+    settings: { sparePercent: 10, endAllowance: 3, verticalAllowance: 2 }
+  };
+  state.counters = { cctv: 0, nvr: 0, switch: 0, junction: 0, route: 0, custom: 0, cable: 0 };
+  reloadAll();
+  document.getElementById('projectName').value = state.project.name;
+  syncSettingsUI();
+  toast('🗑️ ล้างข้อมูลแล้ว', 'success');
+});
+
+// ============ SIDEBAR TOGGLE ============
+document.getElementById('btnToggleSidebar').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.toggle('collapsed');
+  setTimeout(() => map.invalidateSize(), 320);
+});
+document.getElementById('btnCloseSidebar').addEventListener('click', () => {
+  document.getElementById('sidebar').classList.add('collapsed');
+  setTimeout(() => map.invalidateSize(), 320);
+});
+
+// ============ KEYBOARD SHORTCUTS ============
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  if (e.ctrlKey || e.metaKey) {
+    if (e.key === 'z') { e.preventDefault(); undo(); }
+    if (e.key === 'y') { e.preventDefault(); redo(); }
+    if (e.key === 's') { e.preventDefault(); document.getElementById('btnSave').click(); }
+  }
+  if (e.key === 'Escape') {
+    setMode('select');
+    closeMarkerModal();
+  }
+});
+
+// ============ DEMO DATA ============
+function loadDemoData() {
+  if (localStorage.getItem('cctv_planner_project')) return;
+  if (state.project.markers.length > 0) return;
+
+  // Demo: Small school project
+  const baseLat = 13.7563;
+  const baseLng = 100.5018;
+
+  const nvr = addMarker('nvr', L.latLng(baseLat, baseLng), { name: 'NVR-01' });
+  const sw1 = addMarker('switch', L.latLng(baseLat + 0.0005, baseLng + 0.0003), { name: 'SW-01' });
+  const sw2 = addMarker('switch', L.latLng(baseLat - 0.0004, baseLng + 0.0006), { name: 'SW-02' });
+  const jb = addMarker('junction', L.latLng(baseLat + 0.0002, baseLng + 0.0008), { name: 'JB-01' });
+
+  const cam1 = addMarker('cctv', L.latLng(baseLat + 0.0008, baseLng - 0.0002), { name: 'CAM-01' });
+  const cam2 = addMarker('cctv', L.latLng(baseLat + 0.001, baseLng + 0.0005), { name: 'CAM-02' });
+  const cam3 = addMarker('cctv', L.latLng(baseLat - 0.0002, baseLng + 0.001), { name: 'CAM-03' });
+
+  // Cables
+  state.project.cables.push({
+    id: generateId(), name: 'Cable-01', type: 'utp',
+    from: nvr.id, to: sw1.id,
+    points: [[nvr.lat, nvr.lng], [sw1.lat, sw1.lng]]
+  });
+  state.project.cables.push({
+    id: generateId(), name: 'Cable-02', type: 'utp',
+    from: sw1.id, to: sw2.id,
+    points: [[sw1.lat, sw1.lng], [baseLat + 0.0002, baseLng + 0.0005], [sw2.lat, sw2.lng]]
+  });
+  state.project.cables.push({
+    id: generateId(), name: 'Cable-03', type: 'utp',
+    from: sw1.id, to: cam1.id,
+    points: [[sw1.lat, sw1.lng], [baseLat + 0.0007, baseLng + 0.0001], [cam1.lat, cam1.lng]]
+  });
+  state.project.cables.push({
+    id: generateId(), name: 'Cable-04', type: 'utp',
+    from: sw2.id, to: cam2.id,
+    points: [[sw2.lat, sw2.lng], [jb.lat, jb.lng], [cam2.lat, cam2.lng]]
+  });
+  state.project.cables.push({
+    id: generateId(), name: 'Cable-05', type: 'utp',
+    from: sw2.id, to: cam3.id,
+    points: [[sw2.lat, sw2.lng], [cam3.lat, cam3.lng]]
+  });
+
+  state.counters.cable = 5;
+  reloadAll();
+  toast('🎉 โหลดข้อมูลตัวอย่าง (โรงเรียนจำลอง)', 'info');
+}
+
+// ============ INIT ============
+loadDemoData();
+setMode('select');
+showHelp('👋 ยินดีต้อนรับ! เลือกเครื่องมือจาก Sidebar แล้วคลิกบนแผนที่');
+setTimeout(hideHelp, 5000);
+
+// Try to load saved project
+try {
+  const saved = localStorage.getItem('cctv_planner_project');
+  if (saved) {
+    // Don't auto-load; let user click Load button
+  }
+} catch (err) {}
+
+// Resize handler
+window.addEventListener('resize', () => {
+  map.invalidateSize();
+});
+</script>
+
+</body>
+</html>

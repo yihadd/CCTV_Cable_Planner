@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
- <link rel="icon" type="image/x-icon" href="icon\favicon-32x32.png">
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CCTV Cable Planner — วางแผนติดตั้งกล้องวงจรปิดและคำนวณระยะสาย</title>
@@ -19,7 +18,10 @@
   * { font-family: 'Noto Sans Thai', sans-serif; }
   .mono { font-family: 'JetBrains Mono', monospace; }
   body { margin: 0; overflow: hidden; background: #0f172a; }
-  #map { width: 100%; height: 100vh; background: #1e293b; }
+  /* Keep map dimensions independent from Tailwind CDN loading order. */
+  #mapContainer { position: fixed; inset: 0; left: 0; width: auto; height: 100vh; height: 100dvh; min-height: 320px; overflow: hidden; }
+  #map { position: absolute; inset: 0; width: 100%; height: 100%; min-height: 320px; background: #1e293b; z-index: 0; }
+  @media (min-width: 768px) { #mapContainer { left: 20rem; } }
 
   .glass {
     background: rgba(15, 23, 42, 0.92);
@@ -359,6 +361,16 @@
     backdrop-filter: blur(12px);
     box-shadow: 0 4px 20px rgba(0,0,0,0.3);
   }
+  .basemap-choice {
+    color: #cbd5e1; background: transparent; border: 1px solid transparent;
+    border-radius: 9px; padding: 9px 12px; font-size: 12px; font-weight: 700;
+    cursor: pointer; transition: all .18s; white-space: nowrap;
+  }
+  .basemap-choice:hover { background: rgba(71,85,105,.65); }
+  .basemap-choice.active {
+    color: #fff; background: linear-gradient(135deg,#ea580c,#f97316);
+    border-color: rgba(251,146,60,.45); box-shadow: 0 3px 12px rgba(234,88,12,.25);
+  }
 </style>
 </head>
 <body>
@@ -608,9 +620,10 @@
     <button id="btnFitAll" class="glass text-white p-3 rounded-xl shadow-lg hover:bg-slate-700" title="ซูมให้เห็นทั้งหมด">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4"/></svg>
     </button>
-    <button id="btnBasemap" class="glass text-white p-3 rounded-xl shadow-lg hover:bg-slate-700" title="สลับชั้นแผนที่">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
-    </button>
+    <div class="glass p-1.5 rounded-xl shadow-lg flex gap-1" role="group" aria-label="เลือกรูปแบบแผนที่">
+      <button id="btnMapRoad" class="basemap-choice active" type="button" aria-pressed="true" title="แผนที่ถนน">🗺️ Map</button>
+      <button id="btnMapSatellite" class="basemap-choice" type="button" aria-pressed="false" title="ภาพถ่ายดาวเทียม">🛰️ Satellite</button>
+    </div>
   </div>
 
   <!-- Coordinates -->
@@ -737,10 +750,6 @@ const basemaps = [
     attribution: 'Tiles © Esri',
     maxZoom: 19
   }),
-  L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenTopoMap (CC-BY-SA)',
-    maxZoom: 17
-  })
 ];
 basemaps[0].addTo(map);
 let currentBasemap = basemaps[0];
@@ -1485,14 +1494,61 @@ document.addEventListener('click', (e) => {
 });
 
 // ============ BASEMAP ============
-document.getElementById('btnBasemap').addEventListener('click', () => {
-  map.removeLayer(currentBasemap);
-  state.basemapIndex = (state.basemapIndex + 1) % basemaps.length;
-  currentBasemap = basemaps[state.basemapIndex];
-  currentBasemap.addTo(map);
-  const names = ['🗺️ แผนที่ถนน', '🛰️ ภาพถ่ายดาวเทียม', '⛰️ แผนที่ภูมิประเทศ'];
-  toast(names[state.basemapIndex], 'info');
+const BASEMAP_STORAGE_KEY = 'cctv_planner_basemap';
+const basemapButtons = {
+  road: document.getElementById('btnMapRoad'),
+  satellite: document.getElementById('btnMapSatellite')
+};
+
+function setBasemap(type, notify = false) {
+  const nextIndex = type === 'satellite' ? 1 : 0;
+  const nextLayer = basemaps[nextIndex];
+  if (currentBasemap !== nextLayer) {
+    if (map.hasLayer(currentBasemap)) map.removeLayer(currentBasemap);
+    currentBasemap = nextLayer;
+    currentBasemap.addTo(map);
+  }
+  state.basemapIndex = nextIndex;
+  Object.entries(basemapButtons).forEach(([key, button]) => {
+    const active = key === type;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  try { localStorage.setItem(BASEMAP_STORAGE_KEY, type); } catch (err) {
+    console.warn('Unable to save basemap preference:', err);
+  }
+  if (notify) toast(type === 'satellite' ? '🛰️ ภาพถ่ายดาวเทียม' : '🗺️ แผนที่ถนน', 'info');
+}
+
+basemapButtons.road.addEventListener('click', () => setBasemap('road', true));
+basemapButtons.satellite.addEventListener('click', () => setBasemap('satellite', true));
+let savedBasemap = 'road';
+try {
+  savedBasemap = localStorage.getItem(BASEMAP_STORAGE_KEY) === 'satellite' ? 'satellite' : 'road';
+} catch (err) { /* use the default road map */ }
+setBasemap(savedBasemap);
+
+// Leaflet may initialize before CDN styles/fonts and responsive layout finish.
+// Force a size recalculation after the browser has completed layout and whenever
+// the map container changes size (sidebar, viewport, or responsive breakpoint).
+function refreshMapLayout() {
+  requestAnimationFrame(() => {
+    map.invalidateSize({ pan: false, animate: false });
+    currentBasemap.redraw();
+  });
+}
+window.addEventListener('load', () => {
+  refreshMapLayout();
+  setTimeout(refreshMapLayout, 250);
+  setTimeout(refreshMapLayout, 800);
 });
+if ('ResizeObserver' in window) {
+  const mapResizeObserver = new ResizeObserver(() => refreshMapLayout());
+  mapResizeObserver.observe(document.getElementById('mapContainer'));
+  mapResizeObserver.observe(document.getElementById('map'));
+} else {
+  window.addEventListener('resize', refreshMapLayout);
+}
 
 // ============ FIT ALL ============
 document.getElementById('btnFitAll').addEventListener('click', () => {
